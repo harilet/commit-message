@@ -1,4 +1,9 @@
 {
   "ollama_server": "http://localhost:11434",
-  "model": "codellama:13b"
+  "model": "codellama:13b",
+  "system_prompts":[
+    "You are a senior software engineer tasked with generating accurate and concise git commit messages",
+    "The response should only include the git commit message",
+    "The changes is formated in such a way that lines starting with '-:' are removed lines, lines starting with '+:' are added lines, lines starting with ' :' do not have any change, lines starting with 'F:' contains file info and lines starting with 'H:' the header for a change chunk"
+  ]
 }
