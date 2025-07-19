@@ -1,0 +1,4 @@
+{
+  "ollama_server": "http://localhost:11434",
+  "model": "codellama:13b"
+}
