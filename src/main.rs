@@ -11,7 +11,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::Value;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct AppConfig {
     ollama_server: String,
     model: String,
@@ -21,7 +21,7 @@ struct AppConfig {
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    /// Show Config
+    /// Config Management
     #[arg(short, long)]
     config: bool,
 
@@ -44,7 +44,7 @@ async fn main() {
     }
 
     if cli.generate {
-        genetate_commit_message(app_config, client).await;
+        genetate_commit_message(app_config.clone(), client).await;
     }
 }
 
@@ -72,12 +72,13 @@ fn get_config_file() -> File {
 }
 
 async fn genetate_commit_message(app_config: AppConfig, client: Client) {
+    println!("{}", app_config.model);
     let diff_data = get_git_diff().join("");
 
     let body = serde_json::json!({
     "model": app_config.model,
     "prompt": diff_data,
-    "system": "You are a senior software engineer tasked with generating accurate and concise git commit messages. The response should only include the git commit message. The changes is formated in such a way that lines starting with '-:' are removed lines, lines starting with '+:' are added lines, lines starting with ' :' do not have any change, lines starting with 'F:' contains file info and lines starting with 'H:' the header for a change chunk"
+    "system": app_config.system_prompts.join(". ")
     });
     let res = client
         .post(format!("{}/api/generate", app_config.ollama_server))
@@ -87,14 +88,17 @@ async fn genetate_commit_message(app_config: AppConfig, client: Client) {
     match res {
         Ok(mut data) => {
             let mut last_chunk: Vec<u8> = vec![];
-            while let Some(chunk) = data.chunk().await.unwrap() {
+            while let Some(chunk) = data.chunk().await.expect("Data chunk error") {
                 if chunk.len() < 8186 {
                     if last_chunk.is_empty() {
                         let json_chunk: Result<Value, serde_json::Error> =
                             serde_json::from_slice(&chunk);
                         match json_chunk {
                             Ok(data) => {
-                                print!("{}", data["response"].as_str().unwrap());
+                                print!(
+                                    "{}",
+                                    data["response"].as_str().expect("Response string error")
+                                );
                             }
                             Err(e) => {
                                 println!("\nError:{:#?}\non message:{:?}", e, chunk);
@@ -107,7 +111,10 @@ async fn genetate_commit_message(app_config: AppConfig, client: Client) {
                             serde_json::from_slice(&complete_chunk);
                         match json_chunk {
                             Ok(data) => {
-                                print!("{}", data["response"].as_str().unwrap());
+                                print!(
+                                    "{}",
+                                    data["response"].as_str().expect("Response string error")
+                                );
                             }
                             Err(e) => {
                                 println!("\nError:{:#?}\non message:{:?}", e, complete_chunk);
@@ -134,30 +141,39 @@ fn get_git_diff() -> Vec<std::string::String> {
     let current_dir = env::current_dir().expect("Error getting env::current_dir()");
     let location = current_dir.as_path();
 
-    let repo = Repository::open(location).unwrap();
+    let repo = Repository::open(location).expect("Open Repository Failure");
     let mut diff_opts = DiffOptions::new();
-    let old_tree = repo.head().unwrap().peel_to_tree().unwrap();
+    let old_tree = repo
+        .head()
+        .expect("Failed to get HEAD")
+        .peel_to_tree()
+        .expect("Head is not a tree");
 
     let mut diff_data: Vec<String> = vec![];
 
     repo.diff_tree_to_index(
         Some(&old_tree),
-        Some(&repo.index().unwrap()),
+        Some(&repo.index().expect("Failed to index files")),
         Some(&mut diff_opts),
     )
-    .unwrap()
+    .expect("Error creating diff")
     .print(DiffFormat::Patch, |_d, _h, l| {
-        let content = str::from_utf8(l.content()).unwrap().to_string();
+        let content = str::from_utf8(l.content())
+            .expect("Content is not utf-8")
+            .to_string();
         diff_data.push(format!("{}:{}", l.origin(), content));
         true
     })
-    .unwrap();
+    .expect("Error printing diff");
     return diff_data;
 }
 
 fn get_app_config_obejct() -> AppConfig {
     let mut config_file = get_config_file();
     let mut app_config_string = String::new();
-    config_file.read_to_string(&mut app_config_string).unwrap();
-    return serde_json::from_str(&app_config_string).unwrap();
+    config_file
+        .read_to_string(&mut app_config_string)
+        .expect("Config File Read Failure");
+    return serde_json::from_str(&app_config_string)
+        .expect("Config File JSON String To AppConfig Failure");
 }
