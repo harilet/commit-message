@@ -47,7 +47,13 @@ async fn main() {
 }
 
 fn get_config_file() -> File {
-    let file_path = "./config.json";
+    let exe_path = env::current_exe().expect("Failed to get current executable path");
+    let binding = exe_path
+        .parent()
+        .expect("Failed to get executable directory")
+        .to_path_buf()
+        .join("config.json");
+    let file_path = binding.to_str().unwrap();
     if fs::metadata(file_path).is_ok() {
         match File::open(file_path) {
             Ok(file) => {
