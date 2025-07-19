@@ -19,7 +19,7 @@ struct AppConfig {
 }
 
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(version, about, long_about = None, arg_required_else_help = true)]
 struct Cli {
     /// Config Management
     #[arg(short, long)]
@@ -41,9 +41,7 @@ async fn main() {
         println!("ollama_server: {}", app_config.ollama_server);
         println!("model: {}", app_config.model);
         println!("system_prompts: {:?}", app_config.system_prompts);
-    }
-
-    if cli.generate {
+    } else if cli.generate {
         genetate_commit_message(app_config.clone(), client).await;
     }
 }
