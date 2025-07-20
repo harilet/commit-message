@@ -1,13 +1,13 @@
 use std::{
     env,
     fs::{self, File},
-    io::Read,
+    io::{self, Read, Write},
 };
 
 use bytes::Bytes;
 use clap::Parser;
 use git2::{DiffFormat, DiffOptions, Repository};
-use reqwest::Client;
+use reqwest::{Client, Response};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -90,53 +90,46 @@ async fn genetate_commit_message(app_config: AppConfig, client: Client) {
         .send()
         .await;
     match res {
-        Ok(mut data) => {
-            let mut last_chunk: Vec<u8> = vec![];
-            while let Some(chunk) = data.chunk().await.expect("Data chunk error") {
-                if chunk.len() < 8186 {
-                    if last_chunk.is_empty() {
-                        let json_chunk: Result<Value, serde_json::Error> =
-                            serde_json::from_slice(&chunk);
-                        match json_chunk {
-                            Ok(data) => {
-                                print!(
-                                    "{}",
-                                    data["response"].as_str().expect("Response string error")
-                                );
-                            }
-                            Err(e) => {
-                                println!("\nError:{:#?}\non message:{:?}", e, chunk);
-                            }
-                        }
-                    } else {
-                        last_chunk.append(&mut chunk.to_vec());
-                        let complete_chunk = Bytes::from(last_chunk.clone());
-                        let json_chunk: Result<Value, serde_json::Error> =
-                            serde_json::from_slice(&complete_chunk);
-                        match json_chunk {
-                            Ok(data) => {
-                                print!(
-                                    "{}",
-                                    data["response"].as_str().expect("Response string error")
-                                );
-                            }
-                            Err(e) => {
-                                println!("\nError:{:#?}\non message:{:?}", e, complete_chunk);
-                            }
-                        }
-                        last_chunk.clear();
-                    }
-                } else {
-                    if last_chunk.is_empty() {
-                        last_chunk = chunk.to_vec();
-                    } else {
-                        last_chunk.append(&mut chunk.to_vec());
-                    }
-                }
-            }
+        Ok(data) => {
+            handle_ollama_response(data).await;
         }
         Err(e) => {
             println!("Error: {:?}", e);
+        }
+    }
+}
+
+async fn handle_ollama_response(mut data: Response) {
+    let mut last_chunk: Vec<u8> = vec![];
+    while let Some(chunk) = data.chunk().await.expect("Data chunk error") {
+        if chunk.len() < 8186 {
+            let json_chunk: Result<Value, serde_json::Error>;
+            if last_chunk.is_empty() {
+                json_chunk = serde_json::from_slice(&chunk);
+            } else {
+                last_chunk.append(&mut chunk.to_vec());
+                let complete_chunk = Bytes::from(last_chunk.clone());
+                json_chunk = serde_json::from_slice(&complete_chunk);
+                last_chunk.clear();
+            }
+            match json_chunk {
+                Ok(data) => {
+                    print!(
+                        "{}",
+                        data["response"].as_str().expect("Response string error")
+                    );
+                    io::stdout().flush().unwrap();
+                }
+                Err(e) => {
+                    println!("\nError:{:#?}\non message:{:?}", e, chunk);
+                }
+            }
+        } else {
+            if last_chunk.is_empty() {
+                last_chunk = chunk.to_vec();
+            } else {
+                last_chunk.append(&mut chunk.to_vec());
+            }
         }
     }
 }
