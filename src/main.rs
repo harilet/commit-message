@@ -113,13 +113,13 @@ async fn handle_ollama_response(mut data: Response) {
                 last_chunk.clear();
             }
             match json_chunk {
-                Ok(data) => {
-                    print!(
-                        "{}",
-                        data["response"].as_str().expect("Response string error")
-                    );
-                    io::stdout().flush().unwrap();
-                }
+                Ok(data) => match data["response"].as_str() {
+                    Some(response_string) => {
+                        print!("{}", response_string);
+                        io::stdout().flush().unwrap();
+                    }
+                    None => {}
+                },
                 Err(e) => {
                     println!("\nError:{:#?}\non message:{:?}", e, chunk);
                 }
