@@ -1,7 +1,7 @@
 use std::{
     env,
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, Read, Write, stdin, stdout},
 };
 
 use bytes::Bytes;
@@ -138,31 +138,70 @@ fn get_config_file_location() -> String {
 }
 
 async fn genetate_commit_message(app_config: AppConfig, client: Client, model: String) {
-    println!("{}", model);
+    let mut input: String = String::new();
     let diff_data = get_git_diff().join("");
+    let mut messages: Vec<Value> = vec![];
+    messages.push(serde_json::json!({
+    "role": "system",
+    "content":app_config.system_prompts.join(". "),
+    }));
+    messages.push(serde_json::json!({
+    "role": "user",
+    "content":diff_data,
+    }));
 
-    let body = serde_json::json!({
-    "model": model,
-    "prompt": diff_data,
-    "system": app_config.system_prompts.join(". ")
-    });
-    let res = client
-        .post(format!("{}/api/generate", app_config.ollama_server))
-        .body(body.to_string())
-        .send()
-        .await;
-    match res {
-        Ok(data) => {
-            handle_ollama_response(data).await;
+    println!("{}", model);
+    loop {
+        if !input.is_empty() {
+            messages.push(serde_json::json!({
+            "role": "user",
+            "content":input,
+            }));
         }
-        Err(e) => {
-            println!("Error: {:?}", e);
+        let body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        });
+        let res = client
+            .post(format!("{}/api/chat", app_config.ollama_server))
+            .body(body.to_string())
+            .send()
+            .await;
+        match res {
+            Ok(data) => {
+                messages.push(handle_ollama_response(data).await);
+            }
+            Err(e) => {
+                println!("Error: {:?}", e);
+            }
+        }
+        input = get_input();
+        if input == "/bye" {
+            break;
         }
     }
 }
 
-async fn handle_ollama_response(mut data: Response) {
+fn get_input() -> String {
+    let mut s = String::new();
+    print!("\n\"/bye\" to exit: ");
+    let _ = stdout().flush();
+    stdin()
+        .read_line(&mut s)
+        .expect("Did not enter a correct string");
+    if let Some('\n') = s.chars().next_back() {
+        s.pop();
+    }
+    if let Some('\r') = s.chars().next_back() {
+        s.pop();
+    }
+    return s;
+}
+
+async fn handle_ollama_response(mut data: Response) -> Value {
     let mut last_chunk: Vec<u8> = vec![];
+    let mut response: Vec<String> = vec![];
+    let mut role = String::new();
     while let Some(chunk) = data.chunk().await.expect("Data chunk error") {
         if chunk.len() < 8186 {
             let json_chunk: Result<Value, serde_json::Error>;
@@ -175,10 +214,27 @@ async fn handle_ollama_response(mut data: Response) {
                 last_chunk.clear();
             }
             match json_chunk {
-                Ok(data) => match data["response"].as_str() {
+                Ok(data) => match data["message"].as_object() {
                     Some(response_string) => {
-                        print!("{}", response_string);
+                        role = response_string
+                            .get("role")
+                            .unwrap()
+                            .as_str()
+                            .unwrap()
+                            .to_owned();
+                        print!(
+                            "{}",
+                            response_string.get("content").unwrap().as_str().unwrap()
+                        );
                         io::stdout().flush().unwrap();
+                        response.push(
+                            response_string
+                                .get("content")
+                                .unwrap()
+                                .as_str()
+                                .unwrap()
+                                .to_owned(),
+                        );
                     }
                     None => {}
                 },
@@ -194,6 +250,10 @@ async fn handle_ollama_response(mut data: Response) {
             }
         }
     }
+    return serde_json::json!({
+    "role": role,
+    "content":response.join(""),
+    });
 }
 
 fn get_git_diff() -> Vec<std::string::String> {
