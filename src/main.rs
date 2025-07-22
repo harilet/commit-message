@@ -5,13 +5,13 @@ use std::{
 };
 
 use bytes::Bytes;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use git2::{DiffFormat, DiffOptions, Repository};
 use reqwest::{Client, Response};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 struct AppConfig {
     ollama_server: String,
     model: String,
@@ -21,13 +21,27 @@ struct AppConfig {
 #[derive(Parser)]
 #[command(version, about, long_about = None, arg_required_else_help = true)]
 struct Cli {
-    /// Config Management
-    #[arg(short, long)]
-    config: bool,
-
     /// Generate Commit Message
-    #[arg(short, long)]
-    generate: bool,
+    #[command(subcommand)]
+    generate: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Generation Commit Messages
+    Generate {
+        /// lists test values
+        #[arg(short, long)]
+        model: Option<String>,
+    },
+
+    /// Config Managet
+    Config {
+        /// To Set Config
+        /// e.g model=qwen3:8b
+        #[arg(short, long)]
+        set_config: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -36,25 +50,62 @@ async fn main() {
     let client = reqwest::Client::new();
 
     let cli = Cli::parse();
-
-    if cli.config {
-        println!("ollama_server: {}", app_config.ollama_server);
-        println!("model: {}", app_config.model);
-        println!("system_prompts: {:?}", app_config.system_prompts);
-    } else if cli.generate {
-        genetate_commit_message(app_config.clone(), client).await;
+    match &cli.generate {
+        Some(Commands::Generate { model }) => {
+            let use_model: String;
+            match model {
+                Some(model_string) => {
+                    use_model = model_string.to_string();
+                }
+                None => {
+                    use_model = app_config.model.clone();
+                }
+            }
+            genetate_commit_message(app_config.clone(), client, use_model).await;
+        }
+        Some(Commands::Config { set_config }) => {
+            let mut show_config = true;
+            match set_config {
+                Some(set_config_string) => {
+                    show_config = false;
+                    let set_config_list: Vec<&str> = set_config_string.split("=").collect();
+                    if *set_config_list.get(0).unwrap() == "model" {
+                        write_config_file(AppConfig {
+                            ollama_server: app_config.ollama_server.clone(),
+                            model: set_config_list.get(1).unwrap().to_string(),
+                            system_prompts: app_config.system_prompts.clone(),
+                        });
+                    }
+                }
+                None => {}
+            }
+            if show_config {
+                println!("Config File: {}", get_config_file_location());
+                println!("");
+                println!("ollama_server: {}", app_config.ollama_server);
+                println!("model: {}", app_config.model);
+                println!("system_prompts: {:?}", app_config.system_prompts);
+            }
+        }
+        None => {}
     }
 }
 
+fn write_config_file(app_config: AppConfig) {
+    let config_file = get_config_file();
+    match serde_json::to_writer_pretty(config_file, &app_config) {
+        Ok(_) => {
+            println!("Config Updated");
+        }
+        Err(e) => {
+            println!("Config Updated Failed: {:#?}", e);
+        }
+    };
+}
+
 fn get_config_file() -> File {
-    let exe_path = env::current_exe().expect("Failed to get current executable path");
-    let binding = exe_path
-        .parent()
-        .expect("Failed to get executable directory")
-        .to_path_buf()
-        .join("config.json");
-    let file_path = binding.to_str().unwrap();
-    if fs::metadata(file_path).is_ok() {
+    let file_path = get_config_file_location();
+    if fs::metadata(&file_path).is_ok() {
         match File::open(file_path) {
             Ok(file) => {
                 return file;
@@ -75,12 +126,23 @@ fn get_config_file() -> File {
     }
 }
 
-async fn genetate_commit_message(app_config: AppConfig, client: Client) {
-    println!("{}", app_config.model);
+fn get_config_file_location() -> String {
+    let exe_path = env::current_exe().expect("Failed to get current executable path");
+    let binding = exe_path
+        .parent()
+        .expect("Failed to get executable directory")
+        .to_path_buf()
+        .join("config.json");
+    let file_path = binding.to_str().unwrap();
+    return file_path.to_owned();
+}
+
+async fn genetate_commit_message(app_config: AppConfig, client: Client, model: String) {
+    println!("{}", model);
     let diff_data = get_git_diff().join("");
 
     let body = serde_json::json!({
-    "model": app_config.model,
+    "model": model,
     "prompt": diff_data,
     "system": app_config.system_prompts.join(". ")
     });
