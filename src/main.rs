@@ -1,39 +1,34 @@
-use std::{
-    env,
-    fs::{self, File},
-    io::{self, Read, Write, stdin, stdout},
-    sync::{Arc, Mutex},
-};
 use clap::{Parser, Subcommand};
-use git2::{DiffFormat, DiffOptions, Repository};
 use ollama_rs::error;
 use ollama_rs::{
     Ollama,
     generation::chat::{ChatMessage, ChatMessageResponseStream, request::ChatMessageRequest},
 };
-use serde::{Deserialize, Serialize};
+use reqwest::Url;
+
+use std::{
+    io::{self, Write, stdin, stdout},
+    sync::{Arc, Mutex},
+};
 use tokio_stream::StreamExt;
 
-#[derive(Deserialize, Debug, Clone, Serialize)]
-struct AppConfig {
-    ollama_server: String,
-    model: String,
-    system_prompts: Vec<String>,
-}
+mod lib;
+use crate::lib::config::{get_app_config_obejct, get_config_file_location, write_config_file, AppConfig};
+use crate::lib::git::get_git_diff;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None, arg_required_else_help = true)]
 struct Cli {
     /// Generate Commit Message
     #[command(subcommand)]
-    generate: Option<Commands>,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
     /// Generation Commit Messages
     Generate {
-        /// lists test values
+        /// Use the spedified model
         #[arg(short, long)]
         model: Option<String>,
     },
@@ -52,7 +47,7 @@ async fn main() {
     let app_config: AppConfig = get_app_config_obejct();
 
     let cli = Cli::parse();
-    match &cli.generate {
+    match &cli.command {
         Some(Commands::Generate { model }) => {
             let use_model: String;
             match model {
@@ -93,52 +88,6 @@ async fn main() {
     }
 }
 
-fn write_config_file(app_config: AppConfig) {
-    let config_file = get_config_file();
-    match serde_json::to_writer_pretty(config_file, &app_config) {
-        Ok(_) => {
-            println!("Config Updated");
-        }
-        Err(e) => {
-            println!("Config Updated Failed: {:#?}", e);
-        }
-    };
-}
-
-fn get_config_file() -> File {
-    let file_path = get_config_file_location();
-    if fs::metadata(&file_path).is_ok() {
-        match File::open(file_path) {
-            Ok(file) => {
-                return file;
-            }
-            Err(_) => {
-                panic!("Config File Open Error")
-            }
-        }
-    } else {
-        match File::create(file_path) {
-            Ok(file) => {
-                return file;
-            }
-            Err(_) => {
-                panic!("Config File Creation Error")
-            }
-        }
-    }
-}
-
-fn get_config_file_location() -> String {
-    let exe_path = env::current_exe().expect("Failed to get current executable path");
-    let binding = exe_path
-        .parent()
-        .expect("Failed to get executable directory")
-        .to_path_buf()
-        .join("config.json");
-    let file_path = binding.to_str().unwrap();
-    return file_path.to_owned();
-}
-
 async fn genetate_commit_message(app_config: AppConfig, model: String) {
     println!("{}", model.clone());
 
@@ -149,7 +98,7 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
         .unwrap()
         .push(ChatMessage::system(app_config.system_prompts.join(". ")));
 
-    let ollama = Ollama::new("http://localhost".to_string(), 11434);
+    let ollama = Ollama::from_url(Url::parse(&app_config.ollama_server).unwrap());
 
     let diff_data = get_git_diff().join("");
 
@@ -216,45 +165,4 @@ async fn handle_ollama_response(mut stream: ChatMessageResponseStream) {
         print!("{}", data.message.content.as_str());
         io::stdout().flush().unwrap();
     }
-}
-
-fn get_git_diff() -> Vec<std::string::String> {
-    let current_dir = env::current_dir().expect("Error getting env::current_dir()");
-    let location = current_dir.as_path();
-
-    let repo = Repository::open(location).expect("Open Repository Failure");
-    let mut diff_opts = DiffOptions::new();
-    let old_tree = repo
-        .head()
-        .expect("Failed to get HEAD")
-        .peel_to_tree()
-        .expect("Head is not a tree");
-
-    let mut diff_data: Vec<String> = vec![];
-
-    repo.diff_tree_to_index(
-        Some(&old_tree),
-        Some(&repo.index().expect("Failed to index files")),
-        Some(&mut diff_opts),
-    )
-    .expect("Error creating diff")
-    .print(DiffFormat::Patch, |_d, _h, l| {
-        let content = str::from_utf8(l.content())
-            .expect("Content is not utf-8")
-            .to_string();
-        diff_data.push(format!("{}:{}", l.origin(), content));
-        true
-    })
-    .expect("Error printing diff");
-    return diff_data;
-}
-
-fn get_app_config_obejct() -> AppConfig {
-    let mut config_file = get_config_file();
-    let mut app_config_string = String::new();
-    config_file
-        .read_to_string(&mut app_config_string)
-        .expect("Config File Read Failure");
-    return serde_json::from_str(&app_config_string)
-        .expect("Config File JSON String To AppConfig Failure");
 }
