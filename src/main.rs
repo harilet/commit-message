@@ -2,14 +2,17 @@ use std::{
     env,
     fs::{self, File},
     io::{self, Read, Write, stdin, stdout},
+    sync::{Arc, Mutex},
 };
-
-use bytes::Bytes;
 use clap::{Parser, Subcommand};
 use git2::{DiffFormat, DiffOptions, Repository};
-use reqwest::{Client, Response};
+use ollama_rs::error;
+use ollama_rs::{
+    Ollama,
+    generation::chat::{ChatMessage, ChatMessageResponseStream, request::ChatMessageRequest},
+};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use tokio_stream::StreamExt;
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct AppConfig {
@@ -47,7 +50,6 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let app_config: AppConfig = get_app_config_obejct();
-    let client = reqwest::Client::new();
 
     let cli = Cli::parse();
     match &cli.generate {
@@ -61,7 +63,7 @@ async fn main() {
                     use_model = app_config.model.clone();
                 }
             }
-            genetate_commit_message(app_config.clone(), client, use_model).await;
+            genetate_commit_message(app_config.clone(), use_model).await;
         }
         Some(Commands::Config { set_config }) => {
             let mut show_config = true;
@@ -137,49 +139,60 @@ fn get_config_file_location() -> String {
     return file_path.to_owned();
 }
 
-async fn genetate_commit_message(app_config: AppConfig, client: Client, model: String) {
-    let mut input: String = String::new();
-    let diff_data = get_git_diff().join("");
-    let mut messages: Vec<Value> = vec![];
-    messages.push(json!({
-    "role": "system",
-    "content":app_config.system_prompts.join(". "),
-    }));
-    messages.push(json!({
-    "role": "user",
-    "content":diff_data,
-    }));
+async fn genetate_commit_message(app_config: AppConfig, model: String) {
+    println!("{}", model.clone());
 
-    println!("{}", model);
+    let mut input: String = String::new();
+    let history: Arc<Mutex<Vec<ChatMessage>>> = Arc::new(Mutex::new(vec![]));
+    history
+        .lock()
+        .unwrap()
+        .push(ChatMessage::system(app_config.system_prompts.join(". ")));
+
+    let ollama = Ollama::new("http://localhost".to_string(), 11434);
+
+    let diff_data = get_git_diff().join("");
+
+    let mut messages: Vec<ChatMessage> = vec![];
+
+    messages.push(ChatMessage::user(diff_data));
+
     loop {
         if !input.is_empty() {
-            messages.push(json!({
-            "role": "user",
-            "content":input,
-            }));
+            messages.push(ChatMessage::user(input));
         }
-        let body = json!({
-        "model": model,
-        "messages": messages,
-        });
-        let res = client
-            .post(format!("{}/api/chat", app_config.ollama_server))
-            .body(body.to_string())
-            .send()
-            .await;
+        let res = sent_message(&ollama, &history, &model, &messages).await;
         match res {
             Ok(data) => {
-                messages.push(handle_ollama_response(data).await);
+                handle_ollama_response(data).await;
             }
             Err(e) => {
                 println!("Error: {:?}", e);
             }
         }
+        messages.clear();
         input = get_input();
         if input == "/bye" {
             break;
         }
     }
+}
+
+async fn sent_message(
+    ollama: &Ollama,
+    history: &Arc<Mutex<Vec<ChatMessage>>>,
+    model: &String,
+    messages: &Vec<ChatMessage>,
+) -> error::Result<ChatMessageResponseStream> {
+    let temp_history = history.to_owned();
+    let res = ollama
+        .send_chat_messages_with_history_stream(
+            temp_history,
+            ChatMessageRequest::new(model.to_owned(), messages.to_owned()),
+        )
+        .await;
+
+    return res;
 }
 
 fn get_input() -> String {
@@ -198,62 +211,11 @@ fn get_input() -> String {
     return s;
 }
 
-async fn handle_ollama_response(mut data: Response) -> Value {
-    let mut last_chunk: Vec<u8> = vec![];
-    let mut response: Vec<String> = vec![];
-    let mut role = String::new();
-    while let Some(chunk) = data.chunk().await.expect("Data chunk error") {
-        if chunk.len() < 8186 {
-            let json_chunk: Result<Value, serde_json::Error>;
-            if last_chunk.is_empty() {
-                json_chunk = serde_json::from_slice(&chunk);
-            } else {
-                last_chunk.append(&mut chunk.to_vec());
-                let complete_chunk = Bytes::from(last_chunk.clone());
-                json_chunk = serde_json::from_slice(&complete_chunk);
-                last_chunk.clear();
-            }
-            match json_chunk {
-                Ok(data) => match data["message"].as_object() {
-                    Some(response_string) => {
-                        role = response_string
-                            .get("role")
-                            .unwrap()
-                            .as_str()
-                            .unwrap()
-                            .to_owned();
-                        print!(
-                            "{}",
-                            response_string.get("content").unwrap().as_str().unwrap()
-                        );
-                        io::stdout().flush().unwrap();
-                        response.push(
-                            response_string
-                                .get("content")
-                                .unwrap()
-                                .as_str()
-                                .unwrap()
-                                .to_owned(),
-                        );
-                    }
-                    None => {}
-                },
-                Err(e) => {
-                    println!("\nError:{:#?}\non message:{:?}", e, chunk);
-                }
-            }
-        } else {
-            if last_chunk.is_empty() {
-                last_chunk = chunk.to_vec();
-            } else {
-                last_chunk.append(&mut chunk.to_vec());
-            }
-        }
+async fn handle_ollama_response(mut stream: ChatMessageResponseStream) {
+    while let Some(Ok(data)) = stream.next().await {
+        print!("{}", data.message.content.as_str());
+        io::stdout().flush().unwrap();
     }
-    return json!({
-    "role": role,
-    "content":response.join(""),
-    });
 }
 
 fn get_git_diff() -> Vec<std::string::String> {
