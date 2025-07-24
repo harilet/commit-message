@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use git2::{DiffFormat, DiffOptions, Repository};
 use reqwest::{Client, Response};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
 struct AppConfig {
@@ -141,11 +141,11 @@ async fn genetate_commit_message(app_config: AppConfig, client: Client, model: S
     let mut input: String = String::new();
     let diff_data = get_git_diff().join("");
     let mut messages: Vec<Value> = vec![];
-    messages.push(serde_json::json!({
+    messages.push(json!({
     "role": "system",
     "content":app_config.system_prompts.join(". "),
     }));
-    messages.push(serde_json::json!({
+    messages.push(json!({
     "role": "user",
     "content":diff_data,
     }));
@@ -153,12 +153,12 @@ async fn genetate_commit_message(app_config: AppConfig, client: Client, model: S
     println!("{}", model);
     loop {
         if !input.is_empty() {
-            messages.push(serde_json::json!({
+            messages.push(json!({
             "role": "user",
             "content":input,
             }));
         }
-        let body = serde_json::json!({
+        let body = json!({
         "model": model,
         "messages": messages,
         });
@@ -250,7 +250,7 @@ async fn handle_ollama_response(mut data: Response) -> Value {
             }
         }
     }
-    return serde_json::json!({
+    return json!({
     "role": role,
     "content":response.join(""),
     });
