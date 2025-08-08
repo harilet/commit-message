@@ -10,6 +10,7 @@ pub(crate) struct AppConfig {
     pub(crate) ollama_server: String,
     pub(crate) model: String,
     pub(crate) system_prompts: Vec<String>,
+    pub(crate) commit_message: Vec<String>,
 }
 
 pub(crate) fn write_config_file(app_config: AppConfig) {

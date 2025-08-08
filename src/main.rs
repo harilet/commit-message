@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
-use ollama_rs::error;
 use ollama_rs::{
     Ollama,
     generation::chat::{ChatMessage, ChatMessageResponseStream, request::ChatMessageRequest},
+    error
 };
+
 use reqwest::Url;
 
 use std::{
@@ -12,9 +13,11 @@ use std::{
 };
 use tokio_stream::StreamExt;
 
-mod lib;
-use crate::lib::config::{get_app_config_obejct, get_config_file_location, write_config_file, AppConfig};
-use crate::lib::git::get_git_diff;
+mod utils;
+use crate::utils::config::{
+    AppConfig, get_app_config_obejct, get_config_file_location, write_config_file,
+};
+use crate::utils::git::get_git_diff;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None, arg_required_else_help = true)]
@@ -71,6 +74,7 @@ async fn main() {
                             ollama_server: app_config.ollama_server.clone(),
                             model: set_config_list.get(1).unwrap().to_string(),
                             system_prompts: app_config.system_prompts.clone(),
+                            commit_message: app_config.commit_message.clone(),
                         });
                     }
                 }
@@ -82,6 +86,7 @@ async fn main() {
                 println!("ollama_server: {}", app_config.ollama_server);
                 println!("model: {}", app_config.model);
                 println!("system_prompts: {:?}", app_config.system_prompts);
+                println!("commit_message: {:?}", app_config.commit_message);
             }
         }
         None => {}
@@ -97,6 +102,11 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
         .lock()
         .unwrap()
         .push(ChatMessage::system(app_config.system_prompts.join(". ")));
+
+    history
+        .lock()
+        .unwrap()
+        .push(ChatMessage::user(app_config.commit_message.join(". ")));
 
     let ollama = Ollama::from_url(Url::parse(&app_config.ollama_server).unwrap());
 
@@ -120,7 +130,7 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
             }
         }
         messages.clear();
-        input = get_input();
+        input = get_input("\n\"/bye\" to exit: ".to_owned());
         if input == "/bye" {
             break;
         }
@@ -144,9 +154,9 @@ async fn sent_message(
     return res;
 }
 
-fn get_input() -> String {
+fn get_input(input_prompt: String) -> String {
     let mut s = String::new();
-    print!("\n\"/bye\" to exit: ");
+    print!("{}", input_prompt);
     let _ = stdout().flush();
     stdin()
         .read_line(&mut s)
@@ -166,3 +176,4 @@ async fn handle_ollama_response(mut stream: ChatMessageResponseStream) {
         io::stdout().flush().unwrap();
     }
 }
+
