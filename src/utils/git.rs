@@ -31,3 +31,12 @@ pub(crate) fn get_git_diff() -> Vec<std::string::String> {
     .expect("Error printing diff");
     return diff_data;
 }
+
+pub(crate) fn get_current_branch_name() -> String {
+    let current_dir = env::current_dir().expect("Error getting env::current_dir()");
+    let location = current_dir.as_path();
+    let repo = Repository::open(location).expect("Open Repository Failure");
+
+    let head = repo.head().unwrap();
+    head.shorthand().unwrap().to_string()
+}

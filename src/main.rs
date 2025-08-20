@@ -1,11 +1,11 @@
 use clap::{Parser, Subcommand};
 use ollama_rs::{
-    Ollama,
+    Ollama, error,
     generation::chat::{ChatMessage, ChatMessageResponseStream, request::ChatMessageRequest},
-    error
 };
 
 use reqwest::Url;
+use utils::git::get_current_branch_name;
 
 use std::{
     io::{self, Write, stdin, stdout},
@@ -114,6 +114,13 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
 
     let mut messages: Vec<ChatMessage> = vec![];
 
+    messages.push(ChatMessage::user(format!(
+        "The branch name is {}",
+        get_current_branch_name()
+    )));
+
+    messages.push(ChatMessage::user("Folllowing is the changes".to_owned()));
+
     messages.push(ChatMessage::user(diff_data));
 
     loop {
@@ -176,4 +183,3 @@ async fn handle_ollama_response(mut stream: ChatMessageResponseStream) {
         io::stdout().flush().unwrap();
     }
 }
-
