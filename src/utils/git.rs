@@ -1,5 +1,5 @@
+use git2::TreeWalkMode;
 use git2::{DiffFormat, DiffOptions, Repository};
-use git2::{TreeBuilder, TreeWalkMode};
 use std::env;
 use std::path::Path;
 

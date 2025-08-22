@@ -2,21 +2,14 @@ use clap::{Parser, Subcommand};
 use ollama_rs::{
     Ollama,
     coordinator::Coordinator,
-    error,
-    generation::chat::{
-        ChatMessage, ChatMessageResponse, ChatMessageResponseStream, request::ChatMessageRequest,
-    },
+    generation::chat::{ChatMessage, ChatMessageResponse},
 };
 
 use reqwest::Url;
 use tokio::fs;
 use utils::git::{get_current_branch_name, get_project_struture};
 
-use std::{
-    io::{self, Write, stdin, stdout},
-    sync::{Arc, Mutex},
-};
-use tokio_stream::StreamExt;
+use std::io::{self, Write, stdin, stdout};
 
 mod utils;
 use crate::utils::config::{
@@ -125,7 +118,9 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
         get_current_branch_name()
     )));
 
-    messages.push(ChatMessage::user("Folllowing is the changes made that need the commit message".to_owned()));
+    messages.push(ChatMessage::user(
+        "Folllowing is the changes made that need the commit message".to_owned(),
+    ));
 
     messages.push(ChatMessage::user(diff_data));
 
@@ -148,23 +143,6 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
             break;
         }
     }
-}
-
-async fn sent_message(
-    ollama: &Ollama,
-    history: &Arc<Mutex<Vec<ChatMessage>>>,
-    model: &String,
-    messages: &Vec<ChatMessage>,
-) -> error::Result<ChatMessageResponseStream> {
-    let temp_history = history.to_owned();
-    let res = ollama
-        .send_chat_messages_with_history_stream(
-            temp_history,
-            ChatMessageRequest::new(model.to_owned(), messages.to_owned()),
-        )
-        .await;
-
-    return res;
 }
 
 fn get_input(input_prompt: String) -> String {
