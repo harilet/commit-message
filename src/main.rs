@@ -1,11 +1,16 @@
 use clap::{Parser, Subcommand};
 use ollama_rs::{
-    Ollama, error,
-    generation::chat::{ChatMessage, ChatMessageResponseStream, request::ChatMessageRequest},
+    Ollama,
+    coordinator::Coordinator,
+    error,
+    generation::chat::{
+        ChatMessage, ChatMessageResponse, ChatMessageResponseStream, request::ChatMessageRequest,
+    },
 };
 
 use reqwest::Url;
-use utils::git::get_current_branch_name;
+use tokio::fs;
+use utils::git::{get_current_branch_name, get_project_struture};
 
 use std::{
     io::{self, Write, stdin, stdout},
@@ -97,18 +102,19 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
     println!("{}", model.clone());
 
     let mut input: String = String::new();
-    let history: Arc<Mutex<Vec<ChatMessage>>> = Arc::new(Mutex::new(vec![]));
-    history
-        .lock()
-        .unwrap()
-        .push(ChatMessage::system(app_config.system_prompts.join(". ")));
+    let mut history = vec![];
+    history.push(ChatMessage::system(app_config.system_prompts.join(". ")));
 
-    history
-        .lock()
-        .unwrap()
-        .push(ChatMessage::user(app_config.commit_message.join(". ")));
+    history.push(ChatMessage::user(app_config.commit_message.join(". ")));
+
+    history.push(ChatMessage::user(format!(
+        "This is project folder structure: {}",
+        get_project_struture().unwrap().join(",")
+    )));
 
     let ollama = Ollama::from_url(Url::parse(&app_config.ollama_server).unwrap());
+
+    let mut coordinator = Coordinator::new(ollama, model.clone(), history).add_tool(get_file);
 
     let diff_data = get_git_diff().join("");
 
@@ -119,7 +125,7 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
         get_current_branch_name()
     )));
 
-    messages.push(ChatMessage::user("Folllowing is the changes".to_owned()));
+    messages.push(ChatMessage::user("Folllowing is the changes made that need the commit message".to_owned()));
 
     messages.push(ChatMessage::user(diff_data));
 
@@ -127,7 +133,7 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
         if !input.is_empty() {
             messages.push(ChatMessage::user(input));
         }
-        let res = sent_message(&ollama, &history, &model, &messages).await;
+        let res = coordinator.chat(messages.clone()).await;
         match res {
             Ok(data) => {
                 handle_ollama_response(data).await;
@@ -177,9 +183,17 @@ fn get_input(input_prompt: String) -> String {
     return s;
 }
 
-async fn handle_ollama_response(mut stream: ChatMessageResponseStream) {
-    while let Some(Ok(data)) = stream.next().await {
-        print!("{}", data.message.content.as_str());
-        io::stdout().flush().unwrap();
-    }
+async fn handle_ollama_response(stream: ChatMessageResponse) {
+    print!("{}", stream.message.content.as_str());
+    io::stdout().flush().unwrap();
+}
+
+/// Get file contents from a file path.
+///
+/// * file_path - The file path to read from.
+#[ollama_rs::function]
+async fn get_file(file_path: String) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
+    println!("file_path: {file_path}");
+    let file_contents = fs::read_to_string(&file_path).await?;
+    Ok(file_contents)
 }

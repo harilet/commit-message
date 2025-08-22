@@ -212,6 +212,7 @@ dependencies = [
  "git2",
  "ollama-rs",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
@@ -878,11 +879,11 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "659dd1460a1079db751a236b301e78e63486758fee7e2db1ddcd2372c264be36"
+source = "git+https://github.com/pepperoni21/ollama-rs.git?branch=master#68454210e7c326f986f335a455f0e0caa5a931e7"
 dependencies = [
  "async-stream",
  "log",
+ "ollama-rs-macros",
  "reqwest",
  "schemars",
  "serde",
@@ -892,6 +893,16 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "url",
+]
+
+[[package]]
+name = "ollama-rs-macros"
+version = "0.3.2"
+source = "git+https://github.com/pepperoni21/ollama-rs.git?branch=master#68454210e7c326f986f335a455f0e0caa5a931e7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
