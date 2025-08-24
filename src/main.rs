@@ -99,31 +99,28 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
 
     history.push(ChatMessage::user(app_config.commit_message.join(". ")));
 
-    history.push(ChatMessage::user(format!(
-        "This is project folder structure: {}",
-        get_project_struture().unwrap().join(",")
-    )));
-
     let ollama = Ollama::from_url(Url::parse(&app_config.ollama_server).unwrap());
 
     let mut coordinator = Coordinator::new(ollama, model.clone(), history)
         .add_tool(get_file)
         .add_tool(get_file_diff);
 
-    // let diff_data = get_git_diff().join("");
-
     let mut messages: Vec<ChatMessage> = vec![];
+
+    messages.push(ChatMessage::user(format!(
+        "This is project folder structure: {}",
+        get_project_struture().unwrap().join(", ")
+    )));
 
     messages.push(ChatMessage::user(format!(
         "The branch name is {}",
         get_current_branch_name()
     )));
 
-    messages.push(ChatMessage::user(
-        "Folllowing files has changes need the commit message".to_owned(),
-    ));
-
-    messages.push(ChatMessage::user(get_staged_files().join(",")));
+    messages.push(ChatMessage::user(format!(
+        "Following files has changes need the commit message: {}",
+        get_staged_files().join(", ")
+    )));
 
     loop {
         if !input.is_empty() {
@@ -185,5 +182,6 @@ async fn get_file_diff(
     file_path: String,
 ) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
     println!("get_file_diff: {file_path}");
-    Ok(git::get_file_diff(file_path).unwrap())
+    let file_contents = git::get_file_diff(file_path).unwrap();
+    Ok(file_contents)
 }
