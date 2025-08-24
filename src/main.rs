@@ -7,7 +7,7 @@ use ollama_rs::{
 
 use reqwest::Url;
 use tokio::fs;
-use utils::git::{get_current_branch_name, get_project_struture};
+use utils::git::{self, get_current_branch_name, get_project_struture, get_staged_files};
 
 use std::io::{self, Write, stdin, stdout};
 
@@ -15,7 +15,6 @@ mod utils;
 use crate::utils::config::{
     AppConfig, get_app_config_obejct, get_config_file_location, write_config_file,
 };
-use crate::utils::git::get_git_diff;
 
 #[derive(Parser)]
 #[command(version, about, long_about = None, arg_required_else_help = true)]
@@ -107,9 +106,11 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
 
     let ollama = Ollama::from_url(Url::parse(&app_config.ollama_server).unwrap());
 
-    let mut coordinator = Coordinator::new(ollama, model.clone(), history).add_tool(get_file);
+    let mut coordinator = Coordinator::new(ollama, model.clone(), history)
+        .add_tool(get_file)
+        .add_tool(get_file_diff);
 
-    let diff_data = get_git_diff().join("");
+    // let diff_data = get_git_diff().join("");
 
     let mut messages: Vec<ChatMessage> = vec![];
 
@@ -119,10 +120,10 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
     )));
 
     messages.push(ChatMessage::user(
-        "Folllowing is the changes made that need the commit message".to_owned(),
+        "Folllowing files has changes need the commit message".to_owned(),
     ));
 
-    messages.push(ChatMessage::user(diff_data));
+    messages.push(ChatMessage::user(get_staged_files().join(",")));
 
     loop {
         if !input.is_empty() {
@@ -171,7 +172,18 @@ async fn handle_ollama_response(stream: ChatMessageResponse) {
 /// * file_path - The file path to read from.
 #[ollama_rs::function]
 async fn get_file(file_path: String) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
-    println!("file_path: {file_path}");
+    println!("get_file: {file_path}");
     let file_contents = fs::read_to_string(&file_path).await?;
     Ok(file_contents)
+}
+
+/// Get change diff of a file from a file path.
+///
+/// * file_path - The file path to read from.
+#[ollama_rs::function]
+async fn get_file_diff(
+    file_path: String,
+) -> Result<String, Box<dyn std::error::Error + Sync + Send>> {
+    println!("get_file_diff: {file_path}");
+    Ok(git::get_file_diff(file_path).unwrap())
 }
