@@ -34,6 +34,14 @@ enum Commands {
         /// Use the spedified model
         #[arg(short, long)]
         model: Option<String>,
+
+        /// Use the spedified model
+        #[arg(short, long)]
+        chat: Option<String>,
+
+        /// Use the spedified model
+        #[arg(short, long)]
+        initial_message: Option<String>,
     },
 
     /// Config Managet
@@ -51,7 +59,11 @@ async fn main() {
 
     let cli = Cli::parse();
     match &cli.command {
-        Some(Commands::Generate { model }) => {
+        Some(Commands::Generate {
+            model,
+            chat,
+            initial_message,
+        }) => {
             let use_model: String;
             match model {
                 Some(model_string) => {
@@ -61,7 +73,13 @@ async fn main() {
                     use_model = app_config.model.clone();
                 }
             }
-            genetate_commit_message(app_config.clone(), use_model).await;
+            genetate_commit_message(
+                app_config.clone(),
+                use_model,
+                chat.clone(),
+                initial_message.clone(),
+            )
+            .await;
         }
         Some(Commands::Config { set_config }) => {
             let mut show_config = true;
@@ -93,7 +111,12 @@ async fn main() {
     }
 }
 
-async fn genetate_commit_message(app_config: AppConfig, model: String) {
+async fn genetate_commit_message(
+    app_config: AppConfig,
+    model: String,
+    chat: Option<String>,
+    initial_message: Option<String>,
+) {
     println!("{}", model.clone());
 
     let mut input: String = String::new();
@@ -103,10 +126,15 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
         .unwrap()
         .push(ChatMessage::system(app_config.system_prompts.join(". ")));
 
-    history
-        .lock()
-        .unwrap()
-        .push(ChatMessage::user(app_config.commit_message.join(". ")));
+    match chat {
+        Some(_) => {}
+        None => {
+            history
+                .lock()
+                .unwrap()
+                .push(ChatMessage::user(app_config.commit_message.join(". ")));
+        }
+    }
 
     let ollama = Ollama::from_url(Url::parse(&app_config.ollama_server).unwrap());
 
@@ -119,9 +147,22 @@ async fn genetate_commit_message(app_config: AppConfig, model: String) {
         get_current_branch_name()
     )));
 
-    messages.push(ChatMessage::user("Folllowing is the changes".to_owned()));
+    match chat {
+        Some(chat_data) => {
+            messages.push(ChatMessage::user(chat_data));
+        }
+        None => {
+            messages.push(ChatMessage::user("Folllowing is the changes".to_owned()));
+            messages.push(ChatMessage::user(diff_data));
+        }
+    }
 
-    messages.push(ChatMessage::user(diff_data));
+    match initial_message {
+        Some(initial_message_data) => {
+            messages.push(ChatMessage::user(initial_message_data));
+        },
+        None => {},
+    }
 
     loop {
         if !input.is_empty() {
