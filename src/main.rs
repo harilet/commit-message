@@ -151,18 +151,23 @@ async fn genetate_commit_message(
         }
         None => {
             messages.push(ChatMessage::user(format!(
-                "Following files has changes need the commit message: {}",
+                "Following file/files has the changes that needs a commit message: {}",
                 get_staged_files().join(", ")
             )));
+            messages.push(ChatMessage::user(
+                "you can use the get_file_diff to get the changes of a file".to_owned(),
+            ));
         }
     }
 
     match initial_message {
         Some(initial_message_data) => {
             messages.push(ChatMessage::user(initial_message_data));
-        },
-        None => {},
+        }
+        None => {}
     }
+
+    println!("{:#?}", messages);
 
     loop {
         if !input.is_empty() {
